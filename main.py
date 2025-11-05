@@ -2,14 +2,11 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from ml.vectorizer import PersonalityVectorizer
-from ml.mood_engine import MoodEngine
-from ml.responder import Responder
 import sqlite3
 import os
 
-# Path to SQLite database
 from backend.database.db_init import DB_PATH
+from ml.llm import BuddyEngine
 
 app = FastAPI()
 
@@ -21,10 +18,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory cache of buddy engines (optional for performance)
+# In-memory cache of BuddyEngine instances for performance
 buddies = {}
 
-# Pydantic model for chat requests
+# ---------------------------
+# Pydantic models
+# ---------------------------
+
 class ChatRequest(BaseModel):
     buddy_id: str
     personality: str
@@ -55,6 +55,22 @@ def get_history(buddy_id: str, limit: int = 10):
     conn.close()
     return rows[::-1]  # oldest first
 
+def ensure_buddy_in_db(buddy_id: str, personality: str):
+    """
+    Ensure the buddy exists in the DB; if not, insert with default personality vector.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT buddy_id FROM buddies WHERE buddy_id=?", (buddy_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.execute(
+            "INSERT INTO buddies (buddy_id, personality_type, kindness, excitement, humor, current_mood) VALUES (?, ?, ?, ?, ?, ?)",
+            (buddy_id, personality, 0.5, 0.5, 0.5, "neutral")
+        )
+        conn.commit()
+    conn.close()
+
 def update_mood_in_db(buddy_id: str, mood: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -75,31 +91,28 @@ def home():
 
 @app.post("/chat")
 def chat(req: ChatRequest):
-    # Initialize buddy if new
+    # Ensure buddy exists in DB
+    ensure_buddy_in_db(req.buddy_id, req.personality)
+
+    # Initialize BuddyEngine if not in cache
     if req.buddy_id not in buddies:
-        buddies[req.buddy_id] = {
-            "vectorizer": PersonalityVectorizer(),
-            "mood_engine": MoodEngine(),
-        }
+        buddies[req.buddy_id] = BuddyEngine(req.buddy_id, req.personality)
+    else:
+        # Update personality if changed
+        buddies[req.buddy_id].update_personality(req.personality)
 
-    vec = buddies[req.buddy_id]["vectorizer"]
-    mood_engine = buddies[req.buddy_id]["mood_engine"]
+    buddy_engine = buddies[req.buddy_id]
 
-    # Load or initialize personality vector from DB
-    personality_vector = vec.get_vector(req.buddy_id, req.personality)
+    # Get reply and mood from BuddyEngine
+    mood, reply = buddy_engine.get_reply(req.message)
 
-    # Update mood based on incoming message
-    mood = mood_engine.update_mood(req.message)
-    update_mood_in_db(req.buddy_id, mood)
-
-    # Generate reply using personality vector and current mood
-    responder = Responder(personality_vector, mood)
-    reply = responder.generate_response(req.message)
-
-    # Save conversation in DB
+    # Save conversation
     save_conversation(req.buddy_id, req.message, reply)
 
-    # Optional: return last few messages to help frontend context
+    # Update mood in DB
+    update_mood_in_db(req.buddy_id, mood)
+
+    # Return last few messages to help frontend context
     history = get_history(req.buddy_id, limit=5)
 
     return {

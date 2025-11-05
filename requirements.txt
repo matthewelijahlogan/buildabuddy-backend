@@ -1,5 +1,6 @@
 fastapi
 uvicorn
 pydantic
-scikit-learn
-numpy
+sqlite3-binary
+transformers
+torch
