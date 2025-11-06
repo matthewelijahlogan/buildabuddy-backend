@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import os
 
-from backend.database.db_init import DB_PATH
+from database.db_init import DB_PATH
 from ml.llm import BuddyEngine
 
 app = FastAPI(title="Build-A-Buddy Backend")
