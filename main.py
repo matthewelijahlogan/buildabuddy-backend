@@ -120,6 +120,12 @@ def health_check():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/chat-history")
+def chat_history(buddy_id: str, limit: int = 20):
+    history = get_history(buddy_id, limit)
+    return [{"user_message": msg, "buddy_reply": reply} for msg, reply in history]
+
+
 @app.post("/init")
 def init_buddy(req: InitBuddyRequest):
     """Initialize or reset a buddy in DB and memory."""
