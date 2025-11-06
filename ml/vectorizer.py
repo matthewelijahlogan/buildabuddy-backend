@@ -2,7 +2,7 @@
 
 import numpy as np
 import sqlite3
-from backend.database.db_init import DB_PATH
+from database.db_init import DB_PATH
 
 class PersonalityVectorizer:
     def __init__(self):
